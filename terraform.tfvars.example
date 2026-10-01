@@ -1,0 +1,5 @@
+aws_region     = "us-east-1"
+environment    = "dev"
+project_name   = "products-api"
+lambda_memory  = 256
+lambda_timeout = 10
