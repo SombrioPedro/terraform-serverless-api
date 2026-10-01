@@ -6,3 +6,5 @@
 !terraform.tfvars.example
 lambda.zip
 build/
+terraform.tfstate.d/
+!envs/*.tfvars

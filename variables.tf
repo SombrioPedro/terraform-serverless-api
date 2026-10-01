@@ -8,6 +8,11 @@ variable "environment" {
   description = "Ambiente (dev, staging, prod)"
   type        = string
   default     = "dev"
+
+  validation {
+    condition     = contains(["dev", "staging", "prod"], var.environment)
+    error_message = "environment deve ser dev, staging ou prod."
+  }
 }
 
 variable "owner" {
@@ -59,4 +64,10 @@ variable "common_tags" {
     Project   = "products-api"
     Owner     = "devops"
   }
+}
+
+variable "cors_allowed_origins" {
+  description = "Origens autorizadas a chamar a API pelo navegador"
+  type        = list(string)
+  default     = ["*"]
 }

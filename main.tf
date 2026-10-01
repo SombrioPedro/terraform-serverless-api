@@ -24,6 +24,13 @@ resource "aws_dynamodb_table" "products" {
     type = "S"
   }
 
+  lifecycle {
+    precondition {
+      condition     = var.environment == terraform.workspace
+      error_message = "O workspace atual (${terraform.workspace}) é diferente de environment (${var.environment}). Rode: terraform workspace select ${var.environment}"
+    }
+  }
+
   tags = local.tags
 }
 
@@ -84,7 +91,15 @@ resource "aws_lambda_function" "products" {
 resource "aws_apigatewayv2_api" "api" {
   name          = "${local.name_prefix}-api"
   protocol_type = "HTTP"
-  tags          = local.tags
+
+  cors_configuration {
+    allow_origins = var.cors_allowed_origins
+    allow_methods = ["GET", "POST", "DELETE", "OPTIONS"]
+    allow_headers = ["content-type", "x-api-key"]
+    max_age       = 300
+  }
+
+  tags = local.tags
 }
 
 # Liga a API à Lambda (proxy: repassa a requisição inteira)
