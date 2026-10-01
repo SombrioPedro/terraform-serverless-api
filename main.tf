@@ -5,7 +5,6 @@ locals {
     Owner       = var.owner
   })
 
-  # Mesmas rotas do dicionário ROUTES no Python
   api_routes = [
     "POST /products",
     "GET /products",
@@ -13,127 +12,74 @@ locals {
     "DELETE /products/{id}",
   ]
 }
-# ---------- DynamoDB ----------
-resource "aws_dynamodb_table" "products" {
-  name         = "${local.name_prefix}-products"
-  billing_mode = "PAY_PER_REQUEST"
-  hash_key     = "id"
 
-  attribute {
-    name = "id"
-    type = "S"
-  }
-
+resource "terraform_data" "workspace_guard" {
   lifecycle {
     precondition {
       condition     = var.environment == terraform.workspace
-      error_message = "O workspace atual (${terraform.workspace}) é diferente de environment (${var.environment}). Rode: terraform workspace select ${var.environment}"
+      error_message = "O workspace atual (${terraform.workspace}) e diferente de environment (${var.environment}). Rode: terraform workspace select ${var.environment}"
     }
   }
-
-  tags = local.tags
 }
 
-# ---------- CloudWatch ----------
-# O nome precisa ser /aws/lambda/<nome-da-funcao>
-resource "aws_cloudwatch_log_group" "lambda" {
-  name              = "/aws/lambda/${local.name_prefix}"
-  retention_in_days = var.log_retention_days
-  tags              = local.tags
+module "dynamodb" {
+  source = "./modules/dynamodb"
+
+  name     = "${local.name_prefix}-products"
+  hash_key = "id"
+  tags     = local.tags
 }
 
-# ---------- IAM ----------
-resource "aws_iam_role" "lambda" {
-  name               = "${local.name_prefix}-lambda-role"
-  assume_role_policy = data.aws_iam_policy_document.lambda_assume_role.json
-  tags               = local.tags
-}
+module "iam" {
+  source = "./modules/iam"
 
-resource "aws_iam_policy" "lambda" {
-  name   = "${local.name_prefix}-lambda-policy"
-  policy = data.aws_iam_policy_document.lambda_permissions.json
-  tags   = local.tags
-}
-
-resource "aws_iam_role_policy_attachment" "lambda" {
-  role       = aws_iam_role.lambda.name
-  policy_arn = aws_iam_policy.lambda.arn
-}
-
-# ---------- Lambda ----------
-resource "aws_lambda_function" "products" {
-  function_name = local.name_prefix
-  role          = aws_iam_role.lambda.arn
-  runtime       = var.lambda_runtime
-  handler       = "lambda_function.lambda_handler"
-  memory_size   = var.lambda_memory
-  timeout       = var.lambda_timeout
-
-  filename         = data.archive_file.lambda.output_path
-  source_code_hash = data.archive_file.lambda.output_base64sha256
-
-  environment {
-    variables = {
-      TABLE_NAME = aws_dynamodb_table.products.name
-      LOG_LEVEL  = "INFO"
-    }
-  }
-
-  depends_on = [
-    aws_cloudwatch_log_group.lambda,
-    aws_iam_role_policy_attachment.lambda,
+  name = "${local.name_prefix}-lambda"
+  policy_statements = [
+    {
+      sid       = "CloudWatchLogs"
+      actions   = ["logs:CreateLogGroup", "logs:CreateLogStream", "logs:PutLogEvents"]
+      resources = ["${module.lambda.log_group_arn}:*"]
+    },
+    {
+      sid       = "DynamoDBProducts"
+      actions   = ["dynamodb:PutItem", "dynamodb:GetItem", "dynamodb:Scan", "dynamodb:DeleteItem"]
+      resources = [module.dynamodb.arn]
+    },
   ]
-
   tags = local.tags
 }
 
-# ---------- API Gateway ----------
-resource "aws_apigatewayv2_api" "api" {
-  name          = "${local.name_prefix}-api"
-  protocol_type = "HTTP"
+module "lambda" {
+  source = "./modules/lambda"
 
-  cors_configuration {
-    allow_origins = var.cors_allowed_origins
-    allow_methods = ["GET", "POST", "DELETE", "OPTIONS"]
-    allow_headers = ["content-type", "x-api-key"]
-    max_age       = 300
+  function_name      = local.name_prefix
+  source_dir         = "${path.module}/lambda"
+  handler            = "lambda_function.lambda_handler"
+  runtime            = var.lambda_runtime
+  memory_size        = var.lambda_memory
+  timeout            = var.lambda_timeout
+  role_arn           = module.iam.role_arn
+  log_retention_days = var.log_retention_days
+
+  environment_variables = {
+    TABLE_NAME = module.dynamodb.name
+    LOG_LEVEL  = "INFO"
   }
 
   tags = local.tags
 }
 
-# Liga a API à Lambda (proxy: repassa a requisição inteira)
-resource "aws_apigatewayv2_integration" "lambda" {
-  api_id                 = aws_apigatewayv2_api.api.id
-  integration_type       = "AWS_PROXY"
-  integration_uri        = aws_lambda_function.products.invoke_arn
-  integration_method     = "POST"
-  payload_format_version = "2.0"
-}
+module "api_gateway" {
+  source = "./modules/api-gateway"
 
-# Uma rota para cada endpoint, todas apontando para a mesma integração
-resource "aws_apigatewayv2_route" "products" {
-  for_each = toset(local.api_routes)
+  name                 = "${local.name_prefix}-api"
+  lambda_function_name = module.lambda.function_name
+  lambda_invoke_arn    = module.lambda.invoke_arn
+  routes               = local.api_routes
 
-  api_id    = aws_apigatewayv2_api.api.id
-  route_key = each.value
-  target    = "integrations/${aws_apigatewayv2_integration.lambda.id}"
-}
+  cors_allow_origins = var.cors_allowed_origins
+  cors_allow_methods = ["GET", "POST", "DELETE", "OPTIONS"]
+  cors_allow_headers = ["content-type", "x-api-key"]
 
-# Stage $default com auto_deploy: a URL fica sem /dev, /prod etc.
-resource "aws_apigatewayv2_stage" "default" {
-  api_id      = aws_apigatewayv2_api.api.id
-  name        = "$default"
-  auto_deploy = true
-  tags        = local.tags
-}
-
-# ---------- Lambda Permission ----------
-# Autoriza o API Gateway (e só esta API) a invocar a Lambda
-resource "aws_lambda_permission" "apigw" {
-  statement_id  = "AllowAPIGatewayInvoke"
-  action        = "lambda:InvokeFunction"
-  function_name = aws_lambda_function.products.function_name
-  principal     = "apigateway.amazonaws.com"
-  source_arn    = "${aws_apigatewayv2_api.api.execution_arn}/*/*"
+  tags = local.tags
 }

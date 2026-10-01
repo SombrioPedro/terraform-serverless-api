@@ -1,16 +1,19 @@
+output "api_url" {
+  value = module.api_gateway.api_endpoint
+}
+
 output "dynamodb_table_name" {
-  value = aws_dynamodb_table.products.name
+  value = module.dynamodb.name
 }
 
 output "lambda_function_name" {
-  value = aws_lambda_function.products.function_name
+  value = module.lambda.function_name
 }
 
 output "lambda_arn" {
-  value = aws_lambda_function.products.arn
+  value = module.lambda.arn
 }
 
-output "api_url" {
-  description = "URL base da API"
-  value       = aws_apigatewayv2_api.api.api_endpoint
+output "account_id" {
+  value = data.aws_caller_identity.current.account_id
 }
