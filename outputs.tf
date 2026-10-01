@@ -2,6 +2,12 @@ output "api_url" {
   value = module.api_gateway.api_endpoint
 }
 
+output "api_key" {
+  description = "Chave para o header x-api-key"
+  value       = random_password.api_key.result
+  sensitive   = true
+}
+
 output "dynamodb_table_name" {
   value = module.dynamodb.name
 }

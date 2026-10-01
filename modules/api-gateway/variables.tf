@@ -41,6 +41,36 @@ variable "cors_max_age" {
   default = 300
 }
 
+variable "enable_authorizer" {
+  description = "Ativa a Lambda authorizer em todas as rotas"
+  type        = bool
+  default     = false
+}
+
+variable "authorizer_lambda_invoke_arn" {
+  description = "invoke_arn da Lambda authorizer"
+  type        = string
+  default     = null
+}
+
+variable "authorizer_lambda_function_name" {
+  description = "Nome da Lambda authorizer"
+  type        = string
+  default     = null
+}
+
+variable "authorizer_identity_header" {
+  description = "Header que o authorizer confere"
+  type        = string
+  default     = "x-api-key"
+}
+
+variable "authorizer_cache_ttl" {
+  description = "Segundos que o resultado da autorizacao fica em cache"
+  type        = number
+  default     = 300
+}
+
 variable "tags" {
   type    = map(string)
   default = {}
